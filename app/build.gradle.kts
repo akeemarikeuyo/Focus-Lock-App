@@ -16,7 +16,7 @@ android {
         applicationId = "com.focuslockapp.myapplication"
         minSdk = 24
         targetSdk = 36
-        versionCode = 22
+        versionCode = 23
         versionName = "1.6.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -25,7 +25,10 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8: shrink + obfuscate + optimize. Required by Play's "DEX code optimization"
+            // check (obfuscation was 0%). Libraries ship their own keep rules.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

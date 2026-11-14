@@ -19,3 +19,7 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+# Keep file names and line numbers so crash reports in Play Console / Firebase stay readable
+# (Play de-obfuscates them with the mapping file bundled in the .aab).
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile
