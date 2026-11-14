@@ -180,7 +180,29 @@ class MainActivity : AppCompatActivity() {
         FocusState.syncService(this)
         uiRefreshHandler.removeCallbacks(uiRefreshRunnable)
         uiRefreshHandler.post(uiRefreshRunnable)
-        checkAndPromptPermissions()
+        // No permission pop-ups on open any more: setup is asked only when the user first taps
+        // Activate Lock (see setupLauncher), and the status card shows if anything is missing.
+    }
+
+    /** Setup checklist; when it returns OK both required permissions are granted. */
+    private var startLockAfterSetup = false
+    private val setupLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val shouldStart = startLockAfterSetup
+        startLockAfterSetup = false
+        if (result.resultCode == RESULT_OK && shouldStart && SetupPermissions.isReady(this)) {
+            startBlockingService()
+            firebaseAnalytics.logEvent("focus_mode_started", null)
+        }
+        refreshStats()
+    }
+
+    private fun openSetup(thenStartLock: Boolean) {
+        startLockAfterSetup = thenStartLock
+        val intent = Intent(this, SetupActivity::class.java)
+        if (!thenStartLock) intent.putExtra(SetupActivity.EXTRA_BUTTON_TEXT, "Done")
+        setupLauncher.launch(intent)
     }
 
     override fun onPause() {
@@ -210,14 +232,25 @@ class MainActivity : AppCompatActivity() {
         // Status card
         val blockingNow = FocusState.isAiLockActive(this) || FocusState.isManualBlockingNow(this)
         val lockOn = FocusState.shouldServiceRun(this)
+        val ready = SetupPermissions.isReady(this)
         val (title, colorRes) = when {
+            lockOn && !ready -> "Blocking paused" to R.color.brand_danger
             blockingNow -> "Blocking now" to R.color.status_on
             lockOn -> "Scheduled" to R.color.status_scheduled
+            !ready -> "Setup needed" to R.color.status_scheduled
             else -> "Lock is off" to R.color.status_off
         }
+        val detail = when {
+            lockOn && !ready -> "A permission was turned off. Tap to fix."
+            !lockOn && !ready -> "${SetupPermissions.doneCount(this)} of 2 quick steps done · tap to finish"
+            else -> FocusState.statusDetail(this)
+        }
         findViewById<TextView>(R.id.tvStatusTitle)?.text = title
-        findViewById<TextView>(R.id.tvStatusDetail)?.text = FocusState.statusDetail(this)
+        findViewById<TextView>(R.id.tvStatusDetail)?.text = detail
         findViewById<View>(R.id.viewStatusDot)?.background?.mutate()?.setTint(getColor(colorRes))
+        findViewById<View>(R.id.cardStatus)?.setOnClickListener {
+            if (!SetupPermissions.isReady(this)) openSetup(thenStartLock = false)
+        }
 
         // One main button: Activate when off, Stop (with ad hint) when on
         btnStart.visibility = if (lockOn) View.GONE else View.VISIBLE
@@ -249,74 +282,11 @@ class MainActivity : AppCompatActivity() {
         return true
     }
 
-    private fun checkAndPromptPermissions() {
-        // 1. Check Overlay (Draw over other apps)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-            showInstructionalDialog(
-                "Step 1: Appear on Top",
-                "Focus Lock App needs to block distractions. Find 'Focus Lock App' in the list and switch it ON.",
-                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                "package:$packageName"
-            )
-            return
-        }
-
-        // 2. Check Usage Stats (Detecting what app is open)
-        if (!hasUsageStatsPermission()) {
-            showInstructionalDialog(
-                "Step 2: Detect Distractions",
-                "Find 'Focus Lock App' in the list (usually under 'F') and allow access so we can block social media.",
-                Settings.ACTION_USAGE_ACCESS_SETTINGS,
-                null // Usage stats doesn't always support direct package URI, so we coach the user
-            )
-            return
-        }
-
-        // 3. Notification Permission (Android 13+)
-        if (Build.VERSION.SDK_INT >= 33) {
-            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                val prefs = getSharedPreferences("FocusPrefs", Context.MODE_PRIVATE)
-                val alreadyAskedOnce = prefs.getBoolean("REQUESTED_NOTIF_PERMISSION", false)
-                // If we've asked before and the system no longer offers a rationale, the user
-                // permanently denied it — the only way back is the app's notification settings.
-                if (alreadyAskedOnce && !ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.POST_NOTIFICATIONS)) {
-                    showInstructionalDialog(
-                        "Step 3: Turn Reminders Back On",
-                        "Notifications are off, so your daily check-in and focus alerts can't reach you. Enable them in Settings.",
-                        Settings.ACTION_APP_NOTIFICATION_SETTINGS,
-                        null
-                    )
-                } else {
-                    prefs.edit().putBoolean("REQUESTED_NOTIF_PERMISSION", true).apply()
-                    ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
-                }
-                return
-            }
-        }
-
-        // 4. Exact Alarms (Android 12+): the blocker sleeps between lock windows and is woken
-        // by an alarm at the next start time. Without this permission that alarm is inexact,
-        // so a lock could start minutes late.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val alarmManager = getSystemService(Context.ALARM_SERVICE) as? AlarmManager
-            if (alarmManager != null && !alarmManager.canScheduleExactAlarms()) {
-                showInstructionalDialog(
-                    "Step 4: Start Locks On Time",
-                    "Focus Lock App needs 'Alarms & reminders' access so your scheduled locks " +
-                        "start and end exactly on time.",
-                    Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
-                    "package:$packageName"
-                )
-                return
-            }
-        }
-
-        // 5. Battery (asked once, optional): phone makers — Samsung especially — put apps to
-        // sleep after a few days unused, which delays locks and reminders. Play policy prefers
-        // sending users to the setting over requesting the exemption directly.
-        maybeSuggestUnrestrictedBattery()
-    }
-
+    /**
+     * Optional, asked once: phone makers (Samsung especially) put apps to sleep after a few
+     * days unused, which can delay locks and the morning reminder. Play policy prefers sending
+     * users to the setting over requesting the exemption directly.
+     */
     private fun maybeSuggestUnrestrictedBattery() {
         val prefs = FocusState.prefs(this)
         if (prefs.getBoolean("BATTERY_PROMPT_SHOWN", false)) return
@@ -343,52 +313,6 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("Not now", null)
             .show()
-    }
-
-    private fun showInstructionalDialog(title: String, message: String, action: String, uriString: String?) {
-        val builder = AlertDialog.Builder(this)
-        builder.setTitle(title)
-        builder.setMessage(message)
-        builder.setCancelable(false)
-
-        // We use a custom icon to help them recognize the app in the list
-        builder.setIcon(R.mipmap.ic_launcher)
-
-        builder.setPositiveButton("Take Me There") { _, _ ->
-            // Show a "Long" toast that stays on screen while the settings open
-            Toast.makeText(this, "Scroll to find Focus Lock Lock 🔒", Toast.LENGTH_LONG).show()
-
-            val intent = Intent(action)
-
-            // STRESS TEST: Attempting to Deep Link to our specific app settings
-            if (uriString != null) {
-                intent.data = android.net.Uri.parse(uriString)
-            } else if (action == Settings.ACTION_USAGE_ACCESS_SETTINGS) {
-                // Some devices support this to highlight the app automatically
-                try {
-                    intent.data = android.net.Uri.fromParts("package", packageName, null)
-                } catch (e: Exception) {
-                    // Fallback to general list if deep link is rejected
-                }
-            } else if (action == Settings.ACTION_APP_NOTIFICATION_SETTINGS) {
-                // This screen is targeted via an extra, not a data URI
-                intent.putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
-            }
-
-            try {
-                startActivity(intent)
-            } catch (e: Exception) {
-                // Ultimate fallback: Just open settings
-                startActivity(Intent(action))
-            }
-        }
-
-        builder.setNegativeButton("Later") { dialog, _ ->
-            dialog.dismiss()
-            Toast.makeText(this, "App won't work without this permission.", Toast.LENGTH_SHORT).show()
-        }
-
-        builder.show()
     }
 
     private fun initUI() {
@@ -439,8 +363,11 @@ class MainActivity : AppCompatActivity() {
         }
 
         btnStart.setOnClickListener {
-            if (!hasUsageStatsPermission() || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this))) {
-                checkAndPromptPermissions()
+            if (appItems.none { it.isSelected }) {
+                // Ask for apps first, so nobody does setup only to hit "select an app".
+                Toast.makeText(this, "Select at least one app to lock first.", Toast.LENGTH_SHORT).show()
+            } else if (!SetupPermissions.isReady(this)) {
+                openSetup(thenStartLock = true)
             } else {
                 startBlockingService()
                 firebaseAnalytics.logEvent("focus_mode_started", null)
@@ -561,16 +488,38 @@ class MainActivity : AppCompatActivity() {
         // alone made a 6:50 pm window look broken when tested at 6:13 pm.
         val title = if (FocusState.isManualBlockingNow(this)) "Focus Mode active 🔒" else "Focus Mode scheduled 🔒"
         Toast.makeText(this, "$title\n${FocusState.statusText(this)}", Toast.LENGTH_LONG).show()
-        suggestQuickSettingsTileOnce()
+        afterActivationFollowUp()
     }
 
     /**
-     * Tiles never appear in Quick Settings on their own — they sit in the Edit list. After the
-     * first Start, offer it once: a one-tap system prompt on Android 13+, a short how-to before.
+     * Optional asks, spread out: at most ONE per lock activation, in this order —
+     * notifications (one tap), Quick Settings tile (one tap), battery (only by the 3rd lock,
+     * once the app has proven itself). Nothing is asked on first open any more.
      */
-    private fun suggestQuickSettingsTileOnce() {
+    private fun afterActivationFollowUp() {
+        if (askNotificationsOnce()) return
+        if (suggestQuickSettingsTileOnce()) return
+        maybeSuggestUnrestrictedBattery()
+    }
+
+    /** Android 13+ one-tap system prompt, asked once, right after the first lock. */
+    private fun askNotificationsOnce(): Boolean {
+        if (Build.VERSION.SDK_INT < 33) return false
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return false
         val prefs = FocusState.prefs(this)
-        if (prefs.getBoolean("TILE_PROMPT_SHOWN", false)) return
+        if (prefs.getBoolean("REQUESTED_NOTIF_PERMISSION", false)) return false
+        prefs.edit().putBoolean("REQUESTED_NOTIF_PERMISSION", true).apply()
+        ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
+        return true
+    }
+
+    /**
+     * Tiles never appear in Quick Settings on their own — they sit in the Edit list. Offer it
+     * once: a one-tap system prompt on Android 13+, a short how-to before. Returns true if shown.
+     */
+    private fun suggestQuickSettingsTileOnce(): Boolean {
+        val prefs = FocusState.prefs(this)
+        if (prefs.getBoolean("TILE_PROMPT_SHOWN", false)) return false
         prefs.edit().putBoolean("TILE_PROMPT_SHOWN", true).apply()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -596,6 +545,7 @@ class MainActivity : AppCompatActivity() {
                 .setPositiveButton("Got it", null)
                 .show()
         }
+        return true
     }
 
     private fun stopBlockingService() {
@@ -679,10 +629,4 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun hasUsageStatsPermission(): Boolean {
-        val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
-        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) appOps.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), packageName)
-        else appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), packageName)
-        return mode == AppOpsManager.MODE_ALLOWED
-    }
 }

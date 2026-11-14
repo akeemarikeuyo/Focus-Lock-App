@@ -125,9 +125,21 @@ class BlockerService : Service() {
         val isAiActive = FocusState.isAiLockActive(this, now)
         val isManualActive = FocusState.isManualBlockingNow(this)
         if (!isAiActive && !isManualActive) {
-            // Window over (or not started): shut down — the notification goes away — and let
-            // FocusState set an alarm for the next start time. It also expires finished locks.
-            FocusState.syncService(this)
+            if (FocusState.canSleepBetweenWindows(this)) {
+                // Window over (or not started): shut down — the notification goes away — and
+                // let FocusState set an alarm for the next start time. Also expires old locks.
+                FocusState.syncService(this)
+            } else {
+                // No exact-alarm permission: stay up and wait for the next window, but still
+                // stop once nothing is left to enforce.
+                FocusState.expireFinishedLocks(this)
+                if (!FocusState.shouldServiceRun(this)) {
+                    FocusState.refreshTile(this)
+                    stopSelf()
+                } else {
+                    refreshStatusNotification(now)
+                }
+            }
             return
         }
         refreshStatusNotification(now)

@@ -27,8 +27,8 @@ class FocusTileService : TileService() {
             openApp()
             return
         }
-        // No apps chosen yet: send the user to the app to pick some.
-        if (!FocusState.startManualFocusFromSaved(this)) openApp()
+        // Setup not finished, or no apps chosen yet: send the user to the app.
+        if (!SetupPermissions.isReady(this) || !FocusState.startManualFocusFromSaved(this)) openApp()
         updateTile()
     }
 

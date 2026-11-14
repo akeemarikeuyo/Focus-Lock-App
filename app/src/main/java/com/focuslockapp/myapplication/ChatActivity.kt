@@ -257,11 +257,15 @@ class ChatActivity : AppCompatActivity() {
                 .setTitle("Confirm $modeName Mode? 🔒")
                 .setMessage(confirmMessage)
                 .setPositiveButton("YES, LOCK IT") { _, _ ->
-                    FocusState.startAiLock(this, startMillis, endMillis, modeName)
-                    if (startsLater) {
-                        appendChat("FocusCoach", "⏰ Scheduled. $modeName Mode starts ${formatWhen(startMillis)} and ends ${formatWhen(endMillis)}.")
+                    val lock = PendingCoachLock(startMillis, endMillis, modeName, startsLater)
+                    if (SetupPermissions.isReady(this)) {
+                        startCoachLock(lock)
                     } else {
-                        appendChat("FocusCoach", "🔒 DONE. $modeName Mode is active until ${formatWhen(endMillis)}.")
+                        // Blocking can't work without the 2 setup permissions — do setup first,
+                        // then start this exact lock when the user comes back.
+                        pendingCoachLock = lock
+                        appendChat("FocusCoach", "One moment: Focus Lock needs 2 quick permissions before it can block apps.")
+                        setupLauncher.launch(Intent(this, SetupActivity::class.java))
                     }
                 }
                 .setNegativeButton("Cancel") { _, _ ->
@@ -271,6 +275,30 @@ class ChatActivity : AppCompatActivity() {
 
         } catch (e: Exception) {
             appendChat("FocusCoach", "I tried to schedule that, but I got confused. Try again?")
+        }
+    }
+
+    private data class PendingCoachLock(val start: Long, val end: Long, val mode: String, val startsLater: Boolean)
+    private var pendingCoachLock: PendingCoachLock? = null
+
+    private val setupLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val lock = pendingCoachLock
+        pendingCoachLock = null
+        if (lock != null && result.resultCode == RESULT_OK && SetupPermissions.isReady(this)) {
+            startCoachLock(lock)
+        } else if (lock != null) {
+            appendChat("FocusCoach", "No problem. Finish the 2 quick steps whenever you're ready and ask me again.")
+        }
+    }
+
+    private fun startCoachLock(lock: PendingCoachLock) {
+        FocusState.startAiLock(this, lock.start, lock.end, lock.mode)
+        if (lock.startsLater) {
+            appendChat("FocusCoach", "⏰ Scheduled. ${lock.mode} Mode starts ${formatWhen(lock.start)} and ends ${formatWhen(lock.end)}.")
+        } else {
+            appendChat("FocusCoach", "🔒 DONE. ${lock.mode} Mode is active until ${formatWhen(lock.end)}.")
         }
     }
 

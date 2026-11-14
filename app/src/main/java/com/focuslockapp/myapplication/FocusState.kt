@@ -148,8 +148,8 @@ object FocusState {
             return "Coach lock scheduled: starts at " + timeFmt.format(Date(p.getLong(KEY_AI_START, now)))
         }
         if (isManualActive(context)) {
-            return "Scheduled: blocking starts at " +
-                hm(p.getInt(KEY_START_HOUR, DEFAULT_START_HOUR), p.getInt(KEY_START_MIN, 0))
+            // e.g. "Scheduled: starts tomorrow at 6:45 pm · ends 6:55 pm"
+            return "Scheduled: " + statusDetail(context).replaceFirstChar { it.lowercase() }
         }
         return "Focus mode is off"
     }
@@ -254,6 +254,11 @@ object FocusState {
         if (isBlockingNow(context)) {
             cancelWake(context)
             startBlockerService(context)
+        } else if (shouldServiceRun(context) && !canSleepBetweenWindows(context)) {
+            // No "Alarms & reminders" permission: we can't be woken exactly at the start
+            // time, so keep the blocker running (with a "Scheduled" notification) instead of
+            // asking the user for one more permission.
+            startBlockerService(context)
         } else {
             context.stopService(Intent(context, BlockerService::class.java))
             scheduleNextWake(context)
@@ -261,8 +266,15 @@ object FocusState {
         refreshTile(context)
     }
 
+    /** Exact alarms let the blocker sleep between windows. Optional — never prompted for. */
+    fun canSleepBetweenWindows(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return false
+        return alarmManager.canScheduleExactAlarms()
+    }
+
     /** Turns off a finished coach lock, and a one-off (non-repeating) session whose day is over. */
-    private fun expireFinishedLocks(context: Context) {
+    fun expireFinishedLocks(context: Context) {
         val p = prefs(context)
         val now = System.currentTimeMillis()
         if (p.getBoolean(KEY_AI_LOCKED, false) && now >= p.getLong(KEY_AI_END, 0)) {

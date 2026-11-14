@@ -5,9 +5,15 @@
     android:layout_height="match_parent"
     android:background="@drawable/bg_blocked"
     android:fitsSystemWindows="true"
-    android:gravity="center"
     android:orientation="vertical"
-    android:padding="32dp">
+>
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="32dp">
+
 
     <TextView
         android:layout_width="wrap_content"
@@ -75,4 +81,6 @@
         android:textColor="@color/white"
         app:strokeColor="#FFFFFF" />
 
+
+    </LinearLayout>
 </LinearLayout>
