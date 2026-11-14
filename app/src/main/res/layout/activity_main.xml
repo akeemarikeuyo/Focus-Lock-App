@@ -125,12 +125,25 @@
                 android:textColor="#FFFFFF"/>
         </LinearLayout>
 
+        <EditText
+            android:id="@+id/etAppSearch"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:hint="Search apps..."
+            android:inputType="text"
+            android:maxLines="1"
+            android:paddingHorizontal="12dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_secondary"
+            android:textSize="14sp"
+            android:background="@color/list_background"
+            android:layout_marginBottom="8dp"/>
+
         <ListView
             android:id="@+id/appList"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:choiceMode="multipleChoice"
             android:background="@color/list_background"
             android:layout_marginBottom="10dp"/>
 

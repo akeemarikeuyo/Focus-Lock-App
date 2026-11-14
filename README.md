@@ -33,5 +33,24 @@ To protect API quotas, the sensitive keys have been removed from this public rep
     <string name="sheets_webhook_url">YOUR_GOOGLE_SHEETS_WEBHOOK_URL</string>
     <string name="gemini_api_key">YOUR_GEMINI_API_KEY</string>
 </resources>
+```
 
+### Restrict Your API Key
 
+`secrets.xml` keeps the Gemini key out of git, but the key still ships **inside the
+compiled app** once it's built — anyone who decompiles the APK/AAB can extract it. To
+cap the damage if that happens, restrict the key in Google Cloud Console rather than
+leaving it unrestricted:
+
+1. Go to Google Cloud Console → **APIs & Services → Credentials** and select the Gemini key.
+2. Under **Application restrictions**, choose **Android apps** and add:
+   - Package name: `com.focuslockapp.myapplication`
+   - The SHA-1 signing fingerprint for both your debug and release keystores.
+3. Under **API restrictions**, limit the key to the **Generative Language API** only.
+4. (Recommended) Set a daily quota / budget alert on the key so a leaked or abused key fails loudly instead of silently.
+
+This stops the key being reused from a browser, a script, or another app, and caps a
+leak to this app's own quota. It does **not** stop a decompiled/repackaged clone of
+this app from using the embedded key — fully closing that gap means routing Gemini
+calls through a backend proxy instead of calling the API directly from the client,
+which is a larger change than key restriction alone.

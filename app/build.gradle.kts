@@ -9,15 +9,15 @@ plugins {
 android {
     namespace = "com.focuslockapp.myapplication"
 
-    // STABLE SDK VERSION (Android 15)
-    compileSdk = 35
+    // STABLE SDK VERSION (Android 16)
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.focuslockapp.myapplication"
         minSdk = 24
-        targetSdk = 35
-        versionCode = 16
-        versionName = "1.5.7"
+        targetSdk = 36
+        versionCode = 18
+        versionName = "1.5.9"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

@@ -119,34 +119,33 @@ class ChatActivity : AppCompatActivity() {
             val response = FocusCoach.getAdvice(this@ChatActivity, msg, userName, blockedCount)
             val lastIndex = messageList.size - 1
 
-            if (response.trim().startsWith("{") && response.contains("SCHEDULE_BLOCK")) {
-                if (lastIndex >= 0) {
-                    messageList[lastIndex] = ChatMessage("Got it. Checking your schedule...", false)
-                    adapter.notifyItemChanged(lastIndex)
+            when (response) {
+                is CoachResponse.ScheduleRequest -> {
+                    if (lastIndex >= 0) {
+                        messageList[lastIndex] = ChatMessage("Got it. Checking your schedule...", false)
+                        adapter.notifyItemChanged(lastIndex)
+                    }
+                    handleSchedulingCommand(response)
                 }
-                handleSchedulingCommand(response)
-            } else {
-                if (lastIndex >= 0) {
-                    messageList[lastIndex] = ChatMessage(response, false)
-                    adapter.notifyItemChanged(lastIndex)
+                is CoachResponse.Message -> {
+                    if (lastIndex >= 0) {
+                        messageList[lastIndex] = ChatMessage(response.text, false)
+                        adapter.notifyItemChanged(lastIndex)
+                    }
                 }
             }
         }
     }
 
-    private fun handleSchedulingCommand(jsonString: String) {
+    private fun handleSchedulingCommand(request: CoachResponse.ScheduleRequest) {
         try {
-            val cleanJson = jsonString.replace("```json", "").replace("```", "").trim()
-            val jsonObject = JSONObject(cleanJson)
-
             // 1. EXTRACT ALL DETAILS
-            var modeName = jsonObject.optString("reason", "Focus")
-            modeName = modeName.replaceFirstChar { it.uppercase() }
+            val modeName = request.reason.replaceFirstChar { it.uppercase() }
 
-            val startDate = jsonObject.optString("start_date", "Today")
-            val startTime = jsonObject.optString("start_time", "Now")
-            val endDate = jsonObject.optString("end_date", "Unknown")
-            val endTime = jsonObject.optString("end_time", "Unknown")
+            val startDate = request.startDate ?: "Today"
+            val startTime = request.startTime ?: "Now"
+            val endDate = request.endDate ?: "Unknown"
+            val endTime = request.endTime ?: "Unknown"
 
             // 2. CALCULATE LOCK END TIME (Milliseconds)
             val calendar = Calendar.getInstance()
