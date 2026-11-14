@@ -6,11 +6,15 @@ import android.content.Intent
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        // A reboot cancels all AlarmManager alarms, and an app update (auto or manual)
-        // also clears them — either way the daily reminder chain goes silent until
-        // someone reopens the app, unless we reschedule it here.
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
-            MainActivity.rescheduleAlarms(context)
-        }
+        if (intent.action != Intent.ACTION_BOOT_COMPLETED && intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
+
+        // A reboot or an app update kills the blocker and clears every AlarmManager alarm.
+        // Without this, restarting the phone was an easy way to escape a lock.
+        // (The 9am reminder is a Firebase push now, so there is no reminder alarm to restore.)
+        MainActivity.cancelLegacyReminderAlarm(context)
+
+        // Starts the blocker if a window is active now, otherwise re-arms the wake alarm.
+        FocusState.syncService(context)
+        FocusState.updateAutoStop(context)
     }
 }

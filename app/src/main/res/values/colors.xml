@@ -7,14 +7,38 @@
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
 
-    <color name="app_background">#FFFFFF</color>
-    <color name="text_primary">#333333</color>
-    <color name="text_secondary">#888888</color>
+    <!-- Brand (same in light and dark) -->
+    <color name="brand_primary">#1E88E5</color>
+    <color name="brand_danger">#D32F2F</color>
+    <color name="status_on">#2E7D32</color>
+    <color name="status_scheduled">#F9A825</color>
+    <color name="status_off">#9E9E9E</color>
+
+    <!-- Home screen -->
+    <color name="app_background">#F6F7F9</color>
+    <color name="card_background">#FFFFFF</color>
+    <color name="text_primary">#1F2328</color>
+    <color name="text_secondary">#6B7280</color>
+    <color name="divider">#E5E7EB</color>
 
     <color name="stats_background">#E3F2FD</color>
     <color name="stats_title">#1565C0</color>
     <color name="stats_count">#0D47A1</color>
 
-    <color name="list_background">#F5F5F5</color>
-</resources>
+    <color name="list_background">#FFFFFF</color>
+    <color name="tag_background">#E3F2FD</color>
+    <color name="tag_text">#1565C0</color>
 
+    <!-- Coach screen -->
+    <color name="chat_background">#F6F7F9</color>
+    <color name="chat_surface">#FFFFFF</color>
+    <color name="bubble_bot">#E9ECEF</color>
+    <color name="bubble_bot_text">#1F2328</color>
+    <color name="bubble_user">#1E88E5</color>
+    <color name="bubble_user_text">#FFFFFF</color>
+    <color name="input_background">#F1F3F5</color>
+
+    <!-- Tonal buttons -->
+    <color name="brand_container">#DCEBFB</color>
+    <color name="on_brand_container">#0D47A1</color>
+</resources>

@@ -1,218 +1,324 @@
 <?xml version="1.0" encoding="utf-8"?>
-<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:ads="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/app_background"
-    android:padding="20dp">
-
-    <TextView
-        android:id="@+id/tvHeader"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Focus Lock App"
-        android:textSize="28sp"
-        android:textStyle="bold"
-        android:textColor="@color/text_primary"
-        android:layout_centerHorizontal="true"
-        android:layout_marginBottom="15dp"/>
-
-    <androidx.cardview.widget.CardView
-        android:id="@+id/cardDistractionShare"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_below="@id/tvHeader"
-        android:layout_marginBottom="15dp"
-        android:clickable="true"
-        android:focusable="true"
-        android:foreground="?android:attr/selectableItemBackground"
-        app:cardCornerRadius="12dp"
-        app:cardElevation="2dp">
-
-        <androidx.constraintlayout.widget.ConstraintLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@color/stats_background"
-            android:padding="15dp">
-
-            <TextView
-                android:id="@+id/tvAttemptsTitle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="DISTRACTIONS BLOCKED"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:letterSpacing="0.1"
-                android:textColor="@color/stats_title"
-                app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintTop_toTopOf="parent" />
-
-            <TextView
-                android:id="@+id/tvAttemptsCount"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="0"
-                android:textSize="32sp"
-                android:textStyle="bold"
-                android:textColor="@color/stats_count"
-                app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintTop_toBottomOf="@id/tvAttemptsTitle" />
-
-            <ImageView
-                android:id="@+id/ivShareIcon"
-                android:layout_width="28dp"
-                android:layout_height="28dp"
-                android:src="@drawable/ic_share"
-                app:tint="@color/stats_count"
-                app:layout_constraintBottom_toBottomOf="parent"
-                app:layout_constraintEnd_toEndOf="parent"
-                app:layout_constraintTop_toTopOf="parent" />
-
-        </androidx.constraintlayout.widget.ConstraintLayout>
-    </androidx.cardview.widget.CardView>
-
-    <com.google.android.gms.ads.AdView
-        android:id="@+id/adView"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_alignParentBottom="true"
-        android:layout_centerHorizontal="true"
-        ads:adSize="BANNER"
-        ads:adUnitId="ca-app-pub-4473657267431851/3000384920" />
-
-    <TextView
-        android:id="@+id/tvFooter"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Developed by Akanni_ola.dev © 2026"
-        android:textSize="12sp"
-        android:textColor="@color/text_secondary"
-        android:layout_above="@id/adView"
-        android:layout_centerHorizontal="true"
-        android:layout_marginBottom="10dp"/>
+    android:fitsSystemWindows="true"
+    android:orientation="vertical">
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
         android:orientation="vertical"
-        android:layout_below="@id/cardDistractionShare"
-        android:layout_above="@id/tvFooter">
+        android:paddingHorizontal="16dp"
+        android:paddingTop="8dp">
 
+        <!-- Header: title + AI coach entry (moved here from a floating button that sat on the ad) -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginBottom="5dp">
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
 
             <TextView
+                android:id="@+id/tvHeader"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Select apps to lock:"
+                android:text="Focus Lock"
                 android:textColor="@color/text_primary"
-                android:textSize="14sp"/>
+                android:textSize="26sp"
+                android:textStyle="bold" />
 
-            <Button
-                android:id="@+id/btnSelectSocial"
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnCoach"
+                style="@style/Widget.Material3.Button.TonalButton"
                 android:layout_width="wrap_content"
-                android:layout_height="40dp"
+                android:layout_height="wrap_content"
+                android:contentDescription="Chat with AI Coach"
+                android:text="AI Coach"
+                app:icon="@drawable/ic_sparkles" />
+        </LinearLayout>
+
+        <!-- Stats (tap to share) -->
+        <androidx.cardview.widget.CardView
+            android:id="@+id/cardDistractionShare"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="10dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:foreground="?android:attr/selectableItemBackground"
+            app:cardBackgroundColor="@color/stats_background"
+            app:cardCornerRadius="14dp"
+            app:cardElevation="0dp">
+
+            <!-- Compact: [ 3 ] distractions blocked / 🔥 streak     [share] -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="10dp">
+
+                <TextView
+                    android:id="@+id/tvAttemptsCount"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="14dp"
+                    android:text="0"
+                    android:textColor="@color/stats_count"
+                    android:textSize="30sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/tvAttemptsTitle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="distractions blocked"
+                        android:textColor="@color/stats_title"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tvStreak"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Start a focus session to begin a streak"
+                        android:textColor="@color/stats_title"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <ImageView
+                    android:id="@+id/ivShareIcon"
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:layout_marginStart="8dp"
+                    android:contentDescription="Share your score"
+                    android:src="@drawable/ic_share"
+                    app:tint="@color/stats_count" />
+            </LinearLayout>
+        </androidx.cardview.widget.CardView>
+
+        <!-- Lock status: blocking now / scheduled / off -->
+        <androidx.cardview.widget.CardView
+            android:id="@+id/cardStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="10dp"
+            app:cardBackgroundColor="@color/card_background"
+            app:cardCornerRadius="14dp"
+            app:cardElevation="0dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="10dp">
+
+                <View
+                    android:id="@+id/viewStatusDot"
+                    android:layout_width="12dp"
+                    android:layout_height="12dp"
+                    android:layout_marginEnd="12dp"
+                    android:background="@drawable/bg_status_dot" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/tvStatusTitle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Lock is off"
+                        android:textColor="@color/text_primary"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tvStatusDetail"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Pick apps and a time, then tap Activate Lock"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="13sp" />
+                </LinearLayout>
+            </LinearLayout>
+        </androidx.cardview.widget.CardView>
+
+        <!-- App picker -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Apps to lock"
+                    android:textColor="@color/text_primary"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvSelectedCount"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="No apps selected"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnSelectSocial"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
                 android:text="Select Socials"
-                android:textSize="12sp"
-                android:backgroundTint="#2196F3"
-                android:textColor="#FFFFFF"/>
+                android:textSize="13sp" />
         </LinearLayout>
 
         <EditText
             android:id="@+id/etAppSearch"
             android:layout_width="match_parent"
             android:layout_height="44dp"
-            android:hint="Search apps..."
+            android:layout_marginBottom="8dp"
+            android:background="@drawable/bg_search"
+            android:hint="🔍  Search apps"
+            android:importantForAutofill="no"
             android:inputType="text"
             android:maxLines="1"
-            android:paddingHorizontal="12dp"
+            android:paddingHorizontal="16dp"
             android:textColor="@color/text_primary"
             android:textColorHint="@color/text_secondary"
-            android:textSize="14sp"
-            android:background="@color/list_background"
-            android:layout_marginBottom="8dp"/>
+            android:textSize="14sp" />
 
         <ListView
             android:id="@+id/appList"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:background="@color/list_background"
-            android:layout_marginBottom="10dp"/>
+            android:layout_marginBottom="10dp"
+            android:background="@drawable/bg_rounded_card"
+            android:clipToOutline="true"
+            android:divider="@color/divider"
+            android:dividerHeight="1dp" />
 
+        <!-- Schedule -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center"
-            android:layout_marginBottom="5dp">
+            android:orientation="horizontal">
 
-            <Button
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnStartTime"
+                style="@style/Widget.Material3.Button.OutlinedButton"
                 android:layout_width="0dp"
-                android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:text="Start: 09:00 AM"
-                android:layout_marginEnd="5dp"/>
+                android:layout_marginEnd="5dp"
+                android:layout_weight="1"
+                android:text="Start: 9:00 AM"
+                app:icon="@drawable/ic_schedule" />
 
-            <Button
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnEndTime"
+                style="@style/Widget.Material3.Button.OutlinedButton"
                 android:layout_width="0dp"
-                android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:text="End: 05:00 PM"
-                android:layout_marginStart="5dp"/>
+                android:layout_marginStart="5dp"
+                android:layout_weight="1"
+                android:text="End: 5:00 PM"
+                app:icon="@drawable/ic_schedule" />
         </LinearLayout>
 
-        <CheckBox
+        <com.google.android.material.materialswitch.MaterialSwitch
             android:id="@+id/checkRepeat"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Repeat Daily"
+            android:text="Repeat every day"
             android:textColor="@color/text_primary"
-            android:paddingVertical="5dp"/>
+            android:textSize="15sp" />
 
-        <Button
+        <!-- One main action at a time: Activate when off, Stop when on -->
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btnStartBlock"
             android:layout_width="match_parent"
-            android:layout_height="60dp"
-            android:text="🔒 ACTIVATE LOCK"
-            android:textSize="18sp"
-            android:backgroundTint="#D32F2F"
-            android:textColor="#FFFFFF"
-            android:layout_marginTop="10dp"/>
+            android:layout_height="58dp"
+            android:layout_marginTop="6dp"
+            android:backgroundTint="@color/brand_danger"
+            android:text="🔒  Activate Lock"
+            android:textColor="@color/white"
+            android:textSize="17sp"
+            android:textStyle="bold"
+            app:cornerRadius="29dp" />
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btnStopBlock"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="match_parent"
+            android:layout_height="58dp"
+            android:layout_marginTop="6dp"
+            android:text="🔓  Stop Lock"
+            android:textSize="17sp"
+            android:textStyle="bold"
+            android:visibility="gone"
+            app:cornerRadius="29dp" />
+
+        <TextView
+            android:id="@+id/tvStopHint"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="STOP SERVICE"
-            android:backgroundTint="#757575"
-            android:textColor="#FFFFFF"
-            android:layout_marginTop="5dp"/>
+            android:gravity="center"
+            android:layout_marginTop="4dp"
+            android:text="Unlocking early plays a short ad"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp"
+            android:visibility="gone" />
 
+        <TextView
+            android:id="@+id/tvFooter"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="4dp"
+            android:text="Developed by Akanni_ola.dev © 2026"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
     </LinearLayout>
 
-    <com.google.android.material.floatingactionbutton.FloatingActionButton
-        android:id="@+id/fabChat"
+    <!-- Banner kept apart from every button (AdMob accidental-click policy) -->
+    <com.google.android.gms.ads.AdView
+        android:id="@+id/adView"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_alignParentBottom="true"
-        android:layout_alignParentEnd="true"
-        android:layout_marginEnd="20dp"
-        android:layout_marginBottom="30dp"
-        app:srcCompat="@drawable/ic_sparkles"
-        app:tint="#FFFFFF"
-        app:backgroundTint="#2196F3"
-        android:contentDescription="Chat with AI Coach"
-        app:elevation="6dp"
-        app:borderWidth="0dp" />
+        android:layout_gravity="center_horizontal"
+        android:layout_marginBottom="4dp"
+        ads:adSize="BANNER"
+        ads:adUnitId="ca-app-pub-4473657267431851/3000384920" />
 
-</RelativeLayout>
+</LinearLayout>

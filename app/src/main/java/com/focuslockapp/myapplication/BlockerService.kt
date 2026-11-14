@@ -32,9 +32,10 @@ class BlockerService : Service() {
     // 🔥 ADDED VARIABLE
     private lateinit var firebaseAnalytics: FirebaseAnalytics
 
-    // Default times
-    private var startHour = 0; private var startMin = 0
-    private var endHour = 0; private var endMin = 0
+    // Default times (match the home screen's defaults)
+    private var startHour = FocusState.DEFAULT_START_HOUR; private var startMin = 0
+    private var endHour = FocusState.DEFAULT_END_HOUR; private var endMin = 0
+    private var lastMarkedFocusDay: String? = null
     private var repeatDaily = true
     private var manualBlockActivationDate: String? = null
 
@@ -81,26 +82,9 @@ class BlockerService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForegroundService()
 
-        if (intent != null) {
-            val apps = intent.getStringArrayListExtra("BLOCKED_APPS")
-            if (!apps.isNullOrEmpty()) blockedPackages = apps
-
-            startHour = intent.getIntExtra("START_HOUR", startHour)
-            startMin = intent.getIntExtra("START_MIN", startMin)
-            endHour = intent.getIntExtra("END_HOUR", endHour)
-            endMin = intent.getIntExtra("END_MIN", endMin)
-        }
-
-        if (blockedPackages.isEmpty()) {
-            loadConfigFromPrefs()
-        } else {
-            // BLOCKED_APPS/START_*/END_* above come from the intent, but REPEAT_DAILY and the
-            // activation date aren't passed as extras — re-read them so a fresh "Activate Lock"
-            // press updates them even when the service was already running.
-            val prefs = getSharedPreferences("FocusPrefs", Context.MODE_PRIVATE)
-            repeatDaily = prefs.getBoolean("REPEAT_DAILY", true)
-            manualBlockActivationDate = prefs.getString("MANUAL_BLOCK_ACTIVATION_DATE", null)
-        }
+        // Everything is saved to prefs before the service is started (see FocusState), so the
+        // service restarts identically after a reboot, an app update or a tile tap.
+        loadConfigFromPrefs()
 
         if (!isRunning) {
             isRunning = true
@@ -115,9 +99,9 @@ class BlockerService : Service() {
         val savedSet = prefs.getStringSet("saved_apps", emptySet()) ?: emptySet()
         blockedPackages = savedSet.toList()
 
-        startHour = prefs.getInt("START_HOUR", 0)
+        startHour = prefs.getInt("START_HOUR", FocusState.DEFAULT_START_HOUR)
         startMin = prefs.getInt("START_MIN", 0)
-        endHour = prefs.getInt("END_HOUR", 0)
+        endHour = prefs.getInt("END_HOUR", FocusState.DEFAULT_END_HOUR)
         endMin = prefs.getInt("END_MIN", 0)
         repeatDaily = prefs.getBoolean("REPEAT_DAILY", true)
         manualBlockActivationDate = prefs.getString("MANUAL_BLOCK_ACTIVATION_DATE", null)
@@ -134,44 +118,35 @@ class BlockerService : Service() {
 
     private fun checkAndBlock() {
         updateCurrentForegroundApp()
-        val currentApp = currentForegroundApp ?: return
 
+        val now = System.currentTimeMillis()
+
+        // --- 1. IS ANYTHING BEING BLOCKED RIGHT NOW? ---
+        val isAiActive = FocusState.isAiLockActive(this, now)
+        val isManualActive = FocusState.isManualBlockingNow(this)
+        if (!isAiActive && !isManualActive) {
+            // Window over (or not started): shut down — the notification goes away — and let
+            // FocusState set an alarm for the next start time. It also expires finished locks.
+            FocusState.syncService(this)
+            return
+        }
+        refreshStatusNotification(now)
+
+        markFocusDayOnce()
+
+        val currentApp = currentForegroundApp ?: return
         // Never block ourselves
         if (currentApp == packageName) return
 
-        // --- 1. DETERMINE THE ACTIVE BLOCK LIST ---
-        val prefs = getSharedPreferences("FocusPrefs", Context.MODE_PRIVATE)
-        val isAiLocked = prefs.getBoolean("IS_LOCKED", false)
-        val aiEndTime = prefs.getLong("LOCK_END_TIME", 0)
+        // --- 2. THE ACTIVE BLOCK LIST ---
+        // Selected apps are blocked by either lock; the coach lock also adds social apps.
+        val effectiveBlockedApps = HashSet<String>(blockedPackages)
+        if (isAiActive) effectiveBlockedApps.addAll(SOCIAL_PACKAGES)
 
-        val effectiveBlockedApps = ArrayList<String>()
-
-        // A. Add Manual Apps (Always include these)
-        effectiveBlockedApps.addAll(blockedPackages)
-
-        // B. Add Social Apps (IF AI Lock is active)
-        val isAiActive = isAiLocked && System.currentTimeMillis() < aiEndTime
-        if (isAiActive) {
-            effectiveBlockedApps.addAll(SOCIAL_PACKAGES)
-        } else if (isAiLocked && System.currentTimeMillis() >= aiEndTime) {
-            // Auto-turn off if time expired
-            prefs.edit().putBoolean("IS_LOCKED", false).apply()
-        }
-
-        // --- 2. CHECK IF WE SHOULD BLOCK ---
-        // If manual schedule is OFF and AI is OFF, do nothing
-        val isManualActive = shouldBlockManualNow()
-
-        if (!isAiActive && !isManualActive) return
-
-        // --- 3. KILL THE APP ---
+        // --- 3. BLOCK THE APP ---
         if (effectiveBlockedApps.contains(currentApp)) {
+            FocusState.recordBlock(this)
 
-            // Track count in Prefs
-            val currentCount = prefs.getInt("BLOCK_COUNT", 0)
-            prefs.edit().putInt("BLOCK_COUNT", currentCount + 1).apply()
-
-            // 🔥 ADDED: LOG TO FIREBASE
             // We send the specific app name so you know WHICH app they tried to open
             val bundle = Bundle()
             bundle.putString("app_name", currentApp)
@@ -181,7 +156,18 @@ class BlockerService : Service() {
             val blockIntent = Intent(this, BlockedActivity::class.java)
             blockIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             startActivity(blockIntent)
+
+            // Our block screen is now in front. Without this, the next 500 ms checks would still
+            // see the blocked app (its foreground event arrives first) and count it 2-3 times.
+            currentForegroundApp = packageName
         }
+    }
+
+    private fun markFocusDayOnce() {
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        if (lastMarkedFocusDay == today) return
+        lastMarkedFocusDay = today
+        FocusState.markFocusDay(this)
     }
 
     /**
@@ -206,64 +192,48 @@ class BlockerService : Service() {
         lastEventCheckTime = now
     }
 
-    private fun shouldBlockManualNow(): Boolean {
-        if (startHour == 0 && endHour == 0) return true // Manual Start implies Always On until stopped
-        if (!isWithinRepeatWindow()) return false
-
-        val now = Calendar.getInstance()
-        val current = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
-        val start = startHour * 60 + startMin
-        val end = endHour * 60 + endMin
-
-        return if (start < end) {
-            current in start until end
-        } else {
-            current >= start || current < end
-        }
-    }
-
-    /**
-     * When Repeat Daily is off, the manual block should only apply on the day it was
-     * activated (including the following calendar day for an overnight window that
-     * crosses midnight) — not recur every day indefinitely.
-     */
-    private fun isWithinRepeatWindow(): Boolean {
-        if (repeatDaily) return true
-        val activationDate = manualBlockActivationDate ?: return false
-
-        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-        val today = sdf.format(Date())
-        if (today == activationDate) return true
-
-        val isOvernightWindow = (startHour * 60 + startMin) > (endHour * 60 + endMin)
-        if (!isOvernightWindow) return false
-
-        val activationDay = sdf.parse(activationDate) ?: return false
-        val nextDay = Calendar.getInstance().apply {
-            time = activationDay
-            add(Calendar.DAY_OF_YEAR, 1)
-        }
-        return sdf.format(nextDay.time) == today
-    }
+    private val channelId = "FocusServiceChannel"
+    private var lastStatusText: String? = null
+    private var lastStatusCheck = 0L
 
     private fun startForegroundService() {
-        val channelId = "FocusServiceChannel"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(channelId, "Focus Mode Running", NotificationManager.IMPORTANCE_LOW)
             channel.setSound(null, null)
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
         }
-
-        val notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("Focus Lock Active")
-            .setContentText("Monitoring distractions...")
-            .setSmallIcon(R.drawable.ic_notification)
-            .setOngoing(true)
-            .build()
-
-        startForeground(1, notification)
+        val status = FocusState.statusText(this)
+        lastStatusText = status
+        startForeground(1, buildNotification(status))
     }
+
+    /**
+     * Keeps the ongoing notification honest: "Scheduled: blocking starts at 6:50 PM" vs
+     * "Blocking until 6:30 AM". Checked every 5 s; only re-posted when the text changes.
+     */
+    private fun refreshStatusNotification(now: Long) {
+        if (now - lastStatusCheck < 5_000) return
+        lastStatusCheck = now
+        val status = FocusState.statusText(this)
+        if (status == lastStatusText) return
+        lastStatusText = status
+        getSystemService(NotificationManager::class.java)?.notify(1, buildNotification(status))
+    }
+
+    private fun buildNotification(status: String) = NotificationCompat.Builder(this, channelId)
+        .setContentTitle("Focus Lock")
+        .setContentText(status)
+        .setSmallIcon(R.drawable.ic_notification)
+        .setOngoing(true)
+        .setOnlyAlertOnce(true)
+        .setContentIntent(
+            android.app.PendingIntent.getActivity(
+                this, 0, Intent(this, MainActivity::class.java),
+                android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+        )
+        .build()
 
     override fun onDestroy() {
         super.onDestroy()

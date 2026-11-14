@@ -4,14 +4,12 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 
+/**
+ * Fires at the end time of a one-off (non-repeating) manual session. Repeating sessions
+ * never schedule this alarm — the service just waits for the next day's window.
+ */
 class AutoStopReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        // 1. Stop the BlockerService and kill the notification
-        val serviceIntent = Intent(context, BlockerService::class.java)
-        context.stopService(serviceIntent)
-
-        // 2. Reset the lock status in SharedPreferences
-        val prefs = context.getSharedPreferences("FocusPrefs", Context.MODE_PRIVATE)
-        prefs.edit().putBoolean("IS_LOCKED", false).putLong("LOCK_END_TIME", 0).apply()
+        FocusState.endManualSession(context)
     }
 }

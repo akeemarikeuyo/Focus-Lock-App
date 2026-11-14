@@ -2,16 +2,17 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="horizontal"
     android:gravity="center_vertical"
-    android:paddingHorizontal="12dp"
-    android:paddingVertical="10dp">
+    android:minHeight="56dp"
+    android:orientation="horizontal"
+    android:paddingHorizontal="14dp"
+    android:paddingVertical="8dp">
 
     <ImageView
         android:id="@+id/ivAppIcon"
-        android:layout_width="32dp"
-        android:layout_height="32dp"
-        android:layout_marginEnd="12dp"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:layout_marginEnd="14dp"
         android:contentDescription="@null" />
 
     <TextView
@@ -19,7 +20,24 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textColor="@color/text_primary"
         android:textSize="15sp" />
+
+    <TextView
+        android:id="@+id/tvSocialTag"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="8dp"
+        android:background="@drawable/bg_tag"
+        android:paddingHorizontal="8dp"
+        android:paddingVertical="2dp"
+        android:text="Social"
+        android:textColor="@color/tag_text"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
 
     <CheckBox
         android:id="@+id/cbAppSelected"

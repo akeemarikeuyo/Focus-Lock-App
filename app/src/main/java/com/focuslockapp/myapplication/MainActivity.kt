@@ -30,7 +30,6 @@ import androidx.lifecycle.lifecycleScope
 import com.google.android.gms.ads.*
 import com.google.android.gms.ads.interstitial.InterstitialAd
 import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback
-import com.google.android.material.floatingactionbutton.FloatingActionButton
 // --- FIREBASE IMPORTS FIXED ---
 import com.google.firebase.FirebaseApp
 import com.google.firebase.analytics.FirebaseAnalytics
@@ -47,7 +46,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnStop: Button
     private lateinit var btnStartTime: Button
     private lateinit var btnEndTime: Button
-    private lateinit var checkRepeat: CheckBox
+    private lateinit var checkRepeat: CompoundButton
     private lateinit var tvAttemptsCount: TextView
 
     private lateinit var mAdView: AdView
@@ -82,45 +81,19 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val AD_WAIT_TIMEOUT_MS = 6000L
 
-        fun rescheduleAlarms(context: Context) {
-            setPreciseAlarm(context, 9, 0, 100)
-        }
-
-        private fun setPreciseAlarm(context: Context, hour: Int, minute: Int, requestCode: Int) {
+        /**
+         * The 9am reminder now comes from Firebase Cloud Messaging (see FocusMessagingService).
+         * Older versions set a local 9am alarm that re-armed itself daily — and silently died
+         * once the app was put to sleep. Cancel it so nobody gets the reminder twice.
+         */
+        fun cancelLegacyReminderAlarm(context: Context) {
             val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
-            val intent = Intent(context, ReminderReceiver::class.java)
-
             val pendingIntent = PendingIntent.getBroadcast(
-                context, requestCode, intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-
-            val calendar = Calendar.getInstance().apply {
-                timeInMillis = System.currentTimeMillis()
-                set(Calendar.HOUR_OF_DAY, hour)
-                set(Calendar.MINUTE, minute)
-                set(Calendar.SECOND, 0)
-            }
-
-            if (calendar.timeInMillis <= System.currentTimeMillis()) {
-                calendar.add(Calendar.DAY_OF_YEAR, 1)
-            }
-
-            val alarmInfo = AlarmManager.AlarmClockInfo(calendar.timeInMillis, pendingIntent)
-
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    if (alarmManager.canScheduleExactAlarms()) {
-                        alarmManager.setAlarmClock(alarmInfo, pendingIntent)
-                    } else {
-                        alarmManager.set(AlarmManager.RTC_WAKEUP, calendar.timeInMillis, pendingIntent)
-                    }
-                } else {
-                    alarmManager.setAlarmClock(alarmInfo, pendingIntent)
-                }
-            } catch (e: SecurityException) {
-                e.printStackTrace()
-            }
+                context, 100, Intent(context, ReminderReceiver::class.java),
+                PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+            ) ?: return
+            alarmManager.cancel(pendingIntent)
+            pendingIntent.cancel()
         }
     }
 
@@ -156,10 +129,11 @@ class MainActivity : AppCompatActivity() {
         // 3. Share Button Logic
         val shareCard = findViewById<CardView>(R.id.cardDistractionShare)
         shareCard?.setOnClickListener {
-            val prefs = getSharedPreferences("FocusPrefs", Context.MODE_PRIVATE)
-            val distractionsBlocked = prefs.getInt("BLOCK_COUNT", 0)
+            val distractionsBlocked = FocusState.blockCount(this)
+            val streak = FocusState.streakDays(this)
             val playStoreLink = "https://play.google.com/store/apps/details?id=$packageName"
-            val shareMessage = "I just blocked $distractionsBlocked distractions using Focus Lock App🔒. Can you beat my focus score?\n\n$playStoreLink"
+            val streakText = if (streak >= 2) " and I'm on a $streak-day focus streak 🔥" else ""
+            val shareMessage = "I've blocked $distractionsBlocked distractions with Focus Lock App🔒$streakText. Can you beat my focus score?\n\n$playStoreLink"
 
             val sendIntent = Intent().apply {
                 action = Intent.ACTION_SEND
@@ -175,7 +149,7 @@ class MainActivity : AppCompatActivity() {
         initUI()
 
         try {
-            rescheduleAlarms(this)
+            cancelLegacyReminderAlarm(this)
             enableBootReceiver()
         } catch (e: Exception) {
             e.printStackTrace()
@@ -191,19 +165,88 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    // Re-checks the status card while the screen is open (e.g. "Scheduled" -> "Blocking now").
+    private val uiRefreshHandler = Handler(Looper.getMainLooper())
+    private val uiRefreshRunnable = object : Runnable {
+        override fun run() {
+            refreshStats()
+            uiRefreshHandler.postDelayed(this, 30_000)
+        }
+    }
+
     override fun onResume() {
         super.onResume()
-        val prefs = getSharedPreferences("FocusPrefs", Context.MODE_PRIVATE)
-        val count = prefs.getInt("BLOCK_COUNT", 0)
-        if (::tvAttemptsCount.isInitialized) {
-            tvAttemptsCount.text = "$count"
-        }
+        // If a lock should be running but its service was killed, bring it back.
+        FocusState.syncService(this)
+        uiRefreshHandler.removeCallbacks(uiRefreshRunnable)
+        uiRefreshHandler.post(uiRefreshRunnable)
         checkAndPromptPermissions()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        uiRefreshHandler.removeCallbacks(uiRefreshRunnable)
     }
 
     override fun onDestroy() {
         super.onDestroy()
         adWaitRunnable?.let { adWaitHandler.removeCallbacks(it) }
+    }
+
+    /** Stats card, status card, and which main button is shown. */
+    private fun refreshStats() {
+        if (!::tvAttemptsCount.isInitialized) return
+        val count = FocusState.blockCount(this)
+        tvAttemptsCount.text = "$count"
+        findViewById<TextView>(R.id.tvAttemptsTitle)?.text =
+            if (count == 1) "distraction blocked" else "distractions blocked"
+        val streak = FocusState.streakDays(this)
+        findViewById<TextView>(R.id.tvStreak)?.text = when (streak) {
+            0 -> "Start a focus session to begin a streak"
+            1 -> "🔥 1-day focus streak"
+            else -> "🔥 $streak-day focus streak"
+        }
+
+        // Status card
+        val blockingNow = FocusState.isAiLockActive(this) || FocusState.isManualBlockingNow(this)
+        val lockOn = FocusState.shouldServiceRun(this)
+        val (title, colorRes) = when {
+            blockingNow -> "Blocking now" to R.color.status_on
+            lockOn -> "Scheduled" to R.color.status_scheduled
+            else -> "Lock is off" to R.color.status_off
+        }
+        findViewById<TextView>(R.id.tvStatusTitle)?.text = title
+        findViewById<TextView>(R.id.tvStatusDetail)?.text = FocusState.statusDetail(this)
+        findViewById<View>(R.id.viewStatusDot)?.background?.mutate()?.setTint(getColor(colorRes))
+
+        // One main button: Activate when off, Stop (with ad hint) when on
+        btnStart.visibility = if (lockOn) View.GONE else View.VISIBLE
+        btnStop.visibility = if (lockOn) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.tvStopHint)?.visibility = if (lockOn) View.VISIBLE else View.GONE
+
+        // Schedule can't be edited while manual focus mode is on — make that visible.
+        val editable = !FocusState.isManualActive(this)
+        val alpha = if (editable) 1f else 0.45f
+        btnStartTime.alpha = alpha
+        btnEndTime.alpha = alpha
+        checkRepeat.alpha = alpha
+        updateSelectedCount()
+    }
+
+    private fun updateSelectedCount() {
+        val count = appItems.count { it.isSelected }
+        findViewById<TextView>(R.id.tvSelectedCount)?.text = when (count) {
+            0 -> "No apps selected"
+            1 -> "1 app selected"
+            else -> "$count apps selected"
+        }
+    }
+
+    /** True (and tells the user) if focus mode is on, so its schedule can't be edited. */
+    private fun blockIfLocked(): Boolean {
+        if (!FocusState.isManualActive(this)) return false
+        Toast.makeText(this, "Stop the lock first to change apps or times.", Toast.LENGTH_SHORT).show()
+        return true
     }
 
     private fun checkAndPromptPermissions() {
@@ -251,23 +294,55 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // 4. Exact Alarms (Android 12+): without this, the daily reminder and auto-stop
-        // alarms silently fall back to inexact scheduling, which Doze/App Standby defers
-        // or drops for apps that haven't been opened in a while — the reminder then stops
-        // firing reliably. setAlarmClock() (used once this is granted) is exempt from that.
+        // 4. Exact Alarms (Android 12+): the blocker sleeps between lock windows and is woken
+        // by an alarm at the next start time. Without this permission that alarm is inexact,
+        // so a lock could start minutes late.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val alarmManager = getSystemService(Context.ALARM_SERVICE) as? AlarmManager
             if (alarmManager != null && !alarmManager.canScheduleExactAlarms()) {
                 showInstructionalDialog(
-                    "Step 4: Keep Reminders On Time",
-                    "Focus Lock App needs 'Alarms & reminders' access so your daily check-in and " +
-                        "auto-unlock keep firing on time, even after the app sits unused for a while.",
+                    "Step 4: Start Locks On Time",
+                    "Focus Lock App needs 'Alarms & reminders' access so your scheduled locks " +
+                        "start and end exactly on time.",
                     Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
                     "package:$packageName"
                 )
                 return
             }
         }
+
+        // 5. Battery (asked once, optional): phone makers — Samsung especially — put apps to
+        // sleep after a few days unused, which delays locks and reminders. Play policy prefers
+        // sending users to the setting over requesting the exemption directly.
+        maybeSuggestUnrestrictedBattery()
+    }
+
+    private fun maybeSuggestUnrestrictedBattery() {
+        val prefs = FocusState.prefs(this)
+        if (prefs.getBoolean("BATTERY_PROMPT_SHOWN", false)) return
+        val pm = getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager ?: return
+        if (pm.isIgnoringBatteryOptimizations(packageName)) return
+        prefs.edit().putBoolean("BATTERY_PROMPT_SHOWN", true).apply()
+
+        AlertDialog.Builder(this)
+            .setTitle("Keep your locks reliable 🔋")
+            .setMessage(
+                "Your phone may put Focus Lock to sleep to save battery, which can delay locks " +
+                    "and your morning reminder.\n\nOn the next screen, tap Battery and choose " +
+                    "Unrestricted."
+            )
+            .setPositiveButton("Open settings") { _, _ ->
+                try {
+                    startActivity(
+                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                            .setData(android.net.Uri.fromParts("package", packageName, null))
+                    )
+                } catch (e: Exception) {
+                    startActivity(Intent(Settings.ACTION_SETTINGS))
+                }
+            }
+            .setNegativeButton("Not now", null)
+            .show()
     }
 
     private fun showInstructionalDialog(title: String, message: String, action: String, uriString: String?) {
@@ -326,6 +401,7 @@ class MainActivity : AppCompatActivity() {
         tvAttemptsCount = findViewById(R.id.tvAttemptsCount)
 
         findViewById<Button>(R.id.btnSelectSocial)?.setOnClickListener {
+            if (blockIfLocked()) return@setOnClickListener
             val isSelecting = (it as Button).text.toString() == "Select Socials"
             for (item in appItems) {
                 if (item.isSocial && !item.packageName.contains("whatsapp")) {
@@ -333,6 +409,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             appListAdapter.notifyDataSetChanged()
+            updateSelectedCount()
             it.text = if (isSelecting) "Unselect Socials" else "Select Socials"
         }
 
@@ -344,16 +421,21 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
-        findViewById<FloatingActionButton>(R.id.fabChat)?.setOnClickListener {
+        findViewById<View>(R.id.btnCoach)?.setOnClickListener {
             startActivity(Intent(this, ChatActivity::class.java))
         }
 
         loadSavedSettings()
-        btnStartTime.setOnClickListener { showTimePicker(true) }
-        btnEndTime.setOnClickListener { showTimePicker(false) }
+        btnStartTime.setOnClickListener { if (!blockIfLocked()) showTimePicker(true) }
+        btnEndTime.setOnClickListener { if (!blockIfLocked()) showTimePicker(false) }
 
-        checkRepeat.setOnCheckedChangeListener { _, isChecked ->
-            getSharedPreferences("FocusPrefs", Context.MODE_PRIVATE).edit().putBoolean("REPEAT_DAILY", isChecked).apply()
+        checkRepeat.setOnClickListener {
+            // Changing the schedule mid-session would be a free way out of the lock.
+            if (blockIfLocked()) {
+                checkRepeat.isChecked = FocusState.prefs(this).getBoolean(FocusState.KEY_REPEAT_DAILY, true)
+            } else {
+                FocusState.prefs(this).edit().putBoolean(FocusState.KEY_REPEAT_DAILY, checkRepeat.isChecked).apply()
+            }
         }
 
         btnStart.setOnClickListener {
@@ -461,54 +543,65 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startBlockingService() {
-        val prefs = getSharedPreferences("FocusPrefs", Context.MODE_PRIVATE)
-        prefs.edit().putInt("BLOCK_COUNT", 0).apply()
-        tvAttemptsCount.text = "0"
-
         val selectedApps = appItems.filter { it.isSelected }.map { it.packageName }.toSet()
-        val activationDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-        prefs.edit()
-            .putStringSet("saved_apps", selectedApps)
-            .putString("MANUAL_BLOCK_ACTIVATION_DATE", activationDate)
-            .apply()
-
-        val intent = Intent(this, BlockerService::class.java).apply {
-            putStringArrayListExtra("BLOCKED_APPS", ArrayList(selectedApps))
-            putExtra("START_HOUR", startHour)
-            putExtra("START_MIN", startMin)
-            putExtra("END_HOUR", endHour)
-            putExtra("END_MIN", endMin)
+        if (selectedApps.isEmpty()) {
+            Toast.makeText(this, "Select at least one app to lock first.", Toast.LENGTH_SHORT).show()
+            return
         }
+        // Saves apps + times + repeat (so a reboot/update/tile restart behaves the same),
+        // starts the service, and schedules auto-stop only for one-off sessions — a
+        // repeating session must keep running for the next day's window.
+        FocusState.startManualFocus(
+            this, selectedApps,
+            startHour, startMin, endHour, endMin,
+            checkRepeat.isChecked,
+        )
+        refreshStats()
+        // Say whether blocking has started or is waiting for the start time — "Active!"
+        // alone made a 6:50 pm window look broken when tested at 6:13 pm.
+        val title = if (FocusState.isManualBlockingNow(this)) "Focus Mode active 🔒" else "Focus Mode scheduled 🔒"
+        Toast.makeText(this, "$title\n${FocusState.statusText(this)}", Toast.LENGTH_LONG).show()
+        suggestQuickSettingsTileOnce()
+    }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+    /**
+     * Tiles never appear in Quick Settings on their own — they sit in the Edit list. After the
+     * first Start, offer it once: a one-tap system prompt on Android 13+, a short how-to before.
+     */
+    private fun suggestQuickSettingsTileOnce() {
+        val prefs = FocusState.prefs(this)
+        if (prefs.getBoolean("TILE_PROMPT_SHOWN", false)) return
+        prefs.edit().putBoolean("TILE_PROMPT_SHOWN", true).apply()
 
-        Toast.makeText(this, "Focus Mode Active! 🔒", Toast.LENGTH_SHORT).show()
-
-        // --- Schedule Auto-Stop ---
-        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val stopIntent = Intent(this, AutoStopReceiver::class.java)
-        val pendingIntent = PendingIntent.getBroadcast(this, 201, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-
-        val stopCalendar = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, endHour)
-            set(Calendar.MINUTE, endMin)
-            set(Calendar.SECOND, 0)
-        }
-        if (stopCalendar.timeInMillis <= System.currentTimeMillis()) stopCalendar.add(Calendar.DAY_OF_YEAR, 1)
-
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && alarmManager.canScheduleExactAlarms()) {
-                alarmManager.setExact(AlarmManager.RTC_WAKEUP, stopCalendar.timeInMillis, pendingIntent)
-            } else {
-                alarmManager.set(AlarmManager.RTC_WAKEUP, stopCalendar.timeInMillis, pendingIntent)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            try {
+                getSystemService(android.app.StatusBarManager::class.java)?.requestAddTileService(
+                    ComponentName(this, FocusTileService::class.java),
+                    "Focus Lock",
+                    android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_notification),
+                    mainExecutor,
+                ) { /* added, already there, or dismissed — nothing else to do */ }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
-        } catch (e: SecurityException) { e.printStackTrace() }
+        } else {
+            AlertDialog.Builder(this)
+                .setTitle("Tip: start focus in one tap ⚡")
+                .setMessage(
+                    "Add Focus Lock to your Quick Settings:\n\n" +
+                        "1. Swipe down twice from the top of the screen.\n" +
+                        "2. Tap the ✏️ Edit (pencil) button.\n" +
+                        "3. Drag the Focus Lock tile into your tiles."
+                )
+                .setPositiveButton("Got it", null)
+                .show()
+        }
     }
 
     private fun stopBlockingService() {
-        stopService(Intent(this, BlockerService::class.java))
-        getSharedPreferences("FocusPrefs", Context.MODE_PRIVATE).edit().putBoolean("IS_LOCKED", false).apply()
-        Toast.makeText(this, "Focus Mode Stopped", Toast.LENGTH_SHORT).show()
+        FocusState.stopAll(this)
+        refreshStats()
+        Toast.makeText(this, "Lock stopped", Toast.LENGTH_SHORT).show()
     }
 
     private fun loadInstalledApps() {
@@ -517,24 +610,30 @@ class MainActivity : AppCompatActivity() {
         appListAdapter = AppListAdapter()
         appList.adapter = appListAdapter
         appList.setOnItemClickListener { _, _, position, _ ->
+            // The running lock uses the apps saved at Start; editing now would only confuse.
+            if (blockIfLocked()) return@setOnItemClickListener
             displayedItems.getOrNull(position)?.let { it.isSelected = !it.isSelected }
             appListAdapter.notifyDataSetChanged()
+            updateSelectedCount()
         }
 
         lifecycleScope.launch {
             val loadedItems = withContext(Dispatchers.IO) {
                 val pm = packageManager
-                val apps = pm.getInstalledPackages(PackageManager.GET_META_DATA)
+                // Launcher apps only — works with the manifest's <queries> block, so the app
+                // no longer needs the Play-restricted QUERY_ALL_PACKAGES permission.
+                val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+                val launchable = pm.queryIntentActivities(launcherIntent, 0)
+                    .map { it.activityInfo.applicationInfo }
+                    .distinctBy { it.packageName }
                 val items = ArrayList<AppItem>()
-                for (app in apps) {
-                    if (pm.getLaunchIntentForPackage(app.packageName) != null) {
-                        val pkg = app.packageName
-                        if (pkg == "com.android.settings" || pkg == "com.android.phone" || pkg.contains("launcher")) continue
-                        val name = app.applicationInfo?.loadLabel(pm)?.toString() ?: pkg
-                        val icon = app.applicationInfo?.loadIcon(pm) ?: pm.defaultActivityIcon
-                        val isSocial = socialPackages.any { pkg.contains(it) }
-                        items.add(AppItem(name, pkg, savedApps.contains(pkg), isSocial, icon))
-                    }
+                for (info in launchable) {
+                    val pkg = info.packageName
+                    if (pkg == packageName || pkg == "com.android.settings" || pkg == "com.android.phone" || pkg.contains("launcher")) continue
+                    val name = info.loadLabel(pm)?.toString() ?: pkg
+                    val icon = info.loadIcon(pm) ?: pm.defaultActivityIcon
+                    val isSocial = socialPackages.any { pkg.contains(it) }
+                    items.add(AppItem(name, pkg, savedApps.contains(pkg), isSocial, icon))
                 }
                 items.sortWith(compareByDescending<AppItem> { it.isSelected }.thenByDescending { it.isSocial }.thenBy { it.name })
                 items
@@ -542,6 +641,7 @@ class MainActivity : AppCompatActivity() {
             appItems.clear()
             appItems.addAll(loadedItems)
             filterAppList(findViewById<EditText>(R.id.etAppSearch)?.text?.toString().orEmpty())
+            updateSelectedCount()
         }
     }
 
@@ -566,10 +666,13 @@ class MainActivity : AppCompatActivity() {
             val ivIcon = view.findViewById<ImageView>(R.id.ivAppIcon)
             val tvName = view.findViewById<TextView>(R.id.tvAppName)
             val cbSelected = view.findViewById<CheckBox>(R.id.cbAppSelected)
+            val tvSocialTag = view.findViewById<TextView>(R.id.tvSocialTag)
 
             ivIcon.setImageDrawable(item.icon)
             tvName.text = item.name
-            tvName.setTextColor(if (item.isSocial) Color.parseColor("#448AFF") else Color.BLACK)
+            // Social apps get a small tag instead of blue text (which looked like a link
+            // and was unreadable black-on-dark in dark mode).
+            tvSocialTag.visibility = if (item.isSocial) View.VISIBLE else View.GONE
             cbSelected.isChecked = item.isSelected
 
             return view

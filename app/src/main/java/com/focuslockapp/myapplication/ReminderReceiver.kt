@@ -66,7 +66,6 @@ class ReminderReceiver : BroadcastReceiver() {
         if (Build.VERSION.SDK_INT >= 33 &&
             context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
-            MainActivity.rescheduleAlarms(context)
             return
         }
 
@@ -93,7 +92,7 @@ class ReminderReceiver : BroadcastReceiver() {
 
         notificationManager.notify(200, notification)
 
-        // 4. Reschedule for Tomorrow (Loop)
-        MainActivity.rescheduleAlarms(context)
+        // No reschedule: the daily reminder is now a Firebase push (FocusMessagingService).
+        // This receiver only handles a leftover alarm from an older version, once.
     }
 }

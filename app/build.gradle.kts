@@ -16,8 +16,8 @@ android {
         applicationId = "com.focuslockapp.myapplication"
         minSdk = 24
         targetSdk = 36
-        versionCode = 18
-        versionName = "1.5.9"
+        versionCode = 19
+        versionName = "1.6.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -67,14 +67,19 @@ dependencies {
     // AdMob
     implementation(libs.play.services.ads.v2360)
 
-    // Gemini AI SDK
-    implementation(libs.generativeai)
 
     // Coroutines (for background tasks)
     implementation(libs.kotlinx.coroutines.android)
 
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.analytics)
+
+    // Gemini via Firebase AI Logic (no API key in the app) + App Check
+    implementation(libs.firebase.messaging) // daily 9am reminder via FCM topic
+    implementation(libs.firebase.ai)
+    implementation(libs.kotlinx.serialization.json) // reads function-call args
+    implementation(libs.firebase.appcheck.playintegrity)
+    debugImplementation(libs.firebase.appcheck.debug)
 
 
 }

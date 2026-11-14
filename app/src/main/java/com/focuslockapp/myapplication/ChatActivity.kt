@@ -4,8 +4,12 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.util.Patterns
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.TextView
+import com.google.android.material.chip.Chip
+import com.google.android.material.chip.ChipGroup
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -51,7 +55,16 @@ class ChatActivity : AppCompatActivity() {
         recyclerView.layoutManager = LinearLayoutManager(this)
         recyclerView.adapter = adapter
 
-        checkOnboardingStatus()
+        // Restore the previous conversation; only greet when there is nothing to show
+        // or onboarding (name/email) isn't finished.
+        val history = ChatHistory.load(this)
+        messageList.addAll(history)
+        adapter.notifyDataSetChanged()
+        if (messageList.isNotEmpty()) recyclerView.scrollToPosition(messageList.size - 1)
+
+        if (history.isEmpty() || !isOnboarded()) checkOnboardingStatus()
+
+        findViewById<View>(R.id.btnBack).setOnClickListener { finish() }
 
         btnSend.setOnClickListener {
             val msg = etInput.text.toString().trim()
@@ -59,6 +72,53 @@ class ChatActivity : AppCompatActivity() {
                 handleUserMessage(msg)
                 etInput.text.clear()
             }
+        }
+
+        setUpQuickReplies()
+        updateCoachExtras()
+    }
+
+    private fun isOnboarded(): Boolean {
+        val p = getSharedPreferences("UserPrefs", Context.MODE_PRIVATE)
+        return p.getString("USER_NAME", null) != null && p.getString("USER_EMAIL", null) != null
+    }
+
+    /** One-tap prompts that show new users what the coach can do. */
+    private fun setUpQuickReplies() {
+        val group = findViewById<ChipGroup>(R.id.chipGroupQuickReplies)
+        listOf(
+            "🔒 Block socials for 1 hour",
+            "😩 I can't focus",
+            "📚 Plan my study session",
+            "🌙 Lock my apps tonight from 10pm to 7am",
+        ).forEach { text ->
+            val chip = Chip(this).apply {
+                this.text = text
+                isCheckable = false
+                // Match the chat colours (Material's default chip tint is purple).
+                setChipBackgroundColorResource(R.color.chat_surface)
+                setChipStrokeColorResource(R.color.divider)
+                setTextColor(getColor(R.color.text_primary))
+                setOnClickListener {
+                    // Ignore taps while a reply is loading (same rule as the Send button).
+                    if (btnSend.isEnabled) handleUserMessage(text)
+                }
+            }
+            group.addView(chip)
+        }
+    }
+
+    /** Quick replies + "N messages left" only make sense once name/email onboarding is done. */
+    private fun updateCoachExtras() {
+        val visible = if (isOnboarded()) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.quickReplies).visibility = visible
+        val tvLeft = findViewById<TextView>(R.id.tvMessagesLeft)
+        tvLeft.visibility = visible
+        val left = CoachRateLimiter.remainingToday(this)
+        tvLeft.text = when (left) {
+            0 -> "No coach messages left today. Back tomorrow 💪"
+            1 -> "1 coach message left today"
+            else -> "$left coach messages left today"
         }
     }
 
@@ -84,8 +144,16 @@ class ChatActivity : AppCompatActivity() {
 
         if (lowerMsg == "reset profile" || lowerMsg == "change name" || lowerMsg == "reset") {
             prefs.edit().remove("USER_NAME").remove("USER_EMAIL").apply()
+            clearConversation()
             appendChat("FocusCoach", "🔄 Profile reset! Let's start over.")
             appendChat("FocusCoach", "Hello! I am your personal accountability partner. What should I call you?")
+            updateCoachExtras()
+            return
+        }
+
+        if (lowerMsg == "clear chat" || lowerMsg == "clear") {
+            clearConversation()
+            appendChat("FocusCoach", "🧹 Chat cleared. What's distracting you right now?")
             return
         }
 
@@ -104,112 +172,97 @@ class ChatActivity : AppCompatActivity() {
                 if (isValidEmail(msg)) {
                     prefs.edit().putString("USER_EMAIL", msg).apply()
                     sendToGoogleSheet(userName, msg)
-                    appendChat("FocusCoach", "All set! Tell me what you want to achieve today.")
+                    appendChat("FocusCoach", "All set! Tell me what you want to achieve today, or tap one of the ideas below.")
+                    updateCoachExtras()
                 } else {
                     appendChat("FocusCoach", "That doesn't look like a valid email.")
                 }
                 return@launch
             }
 
-            val focusPrefs = getSharedPreferences("FocusPrefs", Context.MODE_PRIVATE)
-            val blockedCount = focusPrefs.getInt("BLOCK_COUNT", 0)
+            val blockedCount = FocusState.blockCount(this@ChatActivity)
+            val streak = FocusState.streakDays(this@ChatActivity)
 
-            appendChat("FocusCoach", "Thinking...")
+            val limit = CoachRateLimiter.check(this@ChatActivity, msg)
+            if (limit is CoachRateLimiter.Result.Denied) {
+                appendChat("FocusCoach", limit.reason)
+                return@launch
+            }
+            CoachRateLimiter.recordRequest(this@ChatActivity)
+            updateCoachExtras()
 
-            val response = FocusCoach.getAdvice(this@ChatActivity, msg, userName, blockedCount)
-            val lastIndex = messageList.size - 1
+            // Recent conversation (before this message) so the coach remembers context.
+            val recent = messageList.dropLast(1).filter { it.text != ChatHistory.THINKING }.takeLast(6)
+
+            appendChat("FocusCoach", ChatHistory.THINKING)
+            btnSend.isEnabled = false
+
+            val response = try {
+                FocusCoach.getAdvice(msg, userName, blockedCount, streak, recent)
+            } finally {
+                btnSend.isEnabled = true
+            }
 
             when (response) {
                 is CoachResponse.ScheduleRequest -> {
-                    if (lastIndex >= 0) {
-                        messageList[lastIndex] = ChatMessage("Got it. Checking your schedule...", false)
-                        adapter.notifyItemChanged(lastIndex)
-                    }
+                    replaceLastMessage("Got it. Checking your schedule...")
                     handleSchedulingCommand(response)
                 }
-                is CoachResponse.Message -> {
-                    if (lastIndex >= 0) {
-                        messageList[lastIndex] = ChatMessage(response.text, false)
-                        adapter.notifyItemChanged(lastIndex)
-                    }
-                }
+                is CoachResponse.Message -> replaceLastMessage(response.text)
             }
         }
     }
 
     private fun handleSchedulingCommand(request: CoachResponse.ScheduleRequest) {
         try {
-            // 1. EXTRACT ALL DETAILS
             val modeName = request.reason.replaceFirstChar { it.uppercase() }
+            val now = System.currentTimeMillis()
+            val dayMs = 24 * 60 * 60 * 1000L
 
-            val startDate = request.startDate ?: "Today"
-            val startTime = request.startTime ?: "Now"
-            val endDate = request.endDate ?: "Unknown"
-            val endTime = request.endTime ?: "Unknown"
+            // START: honour a requested start time (e.g. "from 8pm"); a missing or past
+            // start means "now". Previously the start time was ignored and every lock began
+            // immediately, even though the dialog showed the requested start.
+            var startMillis = parseDateTime(request.startDate, request.startTime)?.timeInMillis ?: now
+            if (startMillis < now) startMillis = now
 
-            // 2. CALCULATE LOCK END TIME (Milliseconds)
-            val calendar = Calendar.getInstance()
-
-            // Try to parse the explicit End Date if available (YYYY-MM-DD)
-            val sdfDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-            if (endDate != "Unknown") {
-                try {
-                    val dateObj = sdfDate.parse(endDate)
-                    if (dateObj != null) {
-                        calendar.time = dateObj
-                    }
-                } catch (e: Exception) {
-                    // Keep today's date if parsing fails
-                }
+            // END: required. Without an explicit date, roll forward to the next occurrence
+            // after the start (e.g. "until 2am" tonight means tomorrow 02:00).
+            val endCal = parseDateTime(request.endDate, request.endTime)
+            if (endCal == null) {
+                appendChat("FocusCoach", "When should the lock end? Try something like \"until 6pm\".")
+                return
+            }
+            var endMillis = endCal.timeInMillis
+            if (request.endDate == null) {
+                while (endMillis <= startMillis) endMillis += dayMs
+            }
+            if (endMillis <= startMillis) {
+                appendChat("FocusCoach", "That end time is already in the past. When should the lock end?")
+                return
             }
 
-            // Set the End Time (HH:MM)
-            val parts = endTime.split(":")
-            if (parts.size == 2) {
-                calendar.set(Calendar.HOUR_OF_DAY, parts[0].toInt())
-                calendar.set(Calendar.MINUTE, parts[1].toInt())
-                calendar.set(Calendar.SECOND, 0)
-
-                // If the calculated time is in the past (and no date was given), assume tomorrow
-                if (calendar.timeInMillis < System.currentTimeMillis() && endDate == "Unknown") {
-                    calendar.add(Calendar.DAY_OF_YEAR, 1)
-                }
-            }
-            val lockEndTimeMillis = calendar.timeInMillis
-
-            // 3. BUILD THE DISPLAY MESSAGE
+            val startsLater = startMillis - now > 60_000
+            val startLabel = if (startsLater) formatWhen(startMillis) else "Now"
             val confirmMessage = """
-                🟢 START: 
-                $startDate at $startTime
-                
-                🔴 END: 
-                $endDate at $endTime
-                
+                🟢 START:
+                $startLabel
+
+                🔴 END:
+                ${formatWhen(endMillis)}
+
                 (Apps will unlock automatically at the End time).
             """.trimIndent()
 
-            // 4. SHOW CONFIRMATION
             AlertDialog.Builder(this)
                 .setTitle("Confirm $modeName Mode? 🔒")
-                .setMessage(confirmMessage) // <--- Shows full details now!
+                .setMessage(confirmMessage)
                 .setPositiveButton("YES, LOCK IT") { _, _ ->
-
-                    val prefs = getSharedPreferences("FocusPrefs", Context.MODE_PRIVATE)
-                    prefs.edit()
-                        .putBoolean("IS_LOCKED", true)
-                        .putLong("LOCK_END_TIME", lockEndTimeMillis)
-                        .putString("LOCK_REASON", modeName)
-                        .apply()
-
-                    // Start the Service
-                    val serviceIntent = Intent(this, BlockerService::class.java)
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        startForegroundService(serviceIntent)
+                    FocusState.startAiLock(this, startMillis, endMillis, modeName)
+                    if (startsLater) {
+                        appendChat("FocusCoach", "⏰ Scheduled. $modeName Mode starts ${formatWhen(startMillis)} and ends ${formatWhen(endMillis)}.")
                     } else {
-                        startService(serviceIntent)
+                        appendChat("FocusCoach", "🔒 DONE. $modeName Mode is active until ${formatWhen(endMillis)}.")
                     }
-
-                    appendChat("FocusCoach", "🔒 DONE. $modeName Mode is active.")
                 }
                 .setNegativeButton("Cancel") { _, _ ->
                     appendChat("FocusCoach", "Okay, I cancelled the block.")
@@ -218,6 +271,44 @@ class ChatActivity : AppCompatActivity() {
 
         } catch (e: Exception) {
             appendChat("FocusCoach", "I tried to schedule that, but I got confused. Try again?")
+        }
+    }
+
+    /** "YYYY-MM-DD" + "HH:MM" from the coach → Calendar (today if no date). Null if no usable time. */
+    private fun parseDateTime(date: String?, time: String?): Calendar? {
+        val parts = time?.trim()?.split(":") ?: return null
+        if (parts.size < 2) return null
+        val hour = parts[0].trim().toIntOrNull() ?: return null
+        val minute = parts[1].trim().take(2).toIntOrNull() ?: return null
+        if (hour !in 0..23 || minute !in 0..59) return null
+
+        val cal = Calendar.getInstance()
+        if (!date.isNullOrBlank()) {
+            try {
+                SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(date.trim())?.let { cal.time = it }
+            } catch (e: Exception) {
+                // Unparseable date: keep today.
+            }
+        }
+        cal.set(Calendar.HOUR_OF_DAY, hour)
+        cal.set(Calendar.MINUTE, minute)
+        cal.set(Calendar.SECOND, 0)
+        cal.set(Calendar.MILLISECOND, 0)
+        return cal
+    }
+
+    /** e.g. "today at 6:00 PM", "tomorrow at 2:00 AM", "Mon 17 Nov at 8:00 PM". */
+    private fun formatWhen(millis: Long): String {
+        val target = Calendar.getInstance().apply { timeInMillis = millis }
+        val today = Calendar.getInstance()
+        val tomorrow = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 1) }
+        fun sameDay(a: Calendar, b: Calendar) =
+            a.get(Calendar.YEAR) == b.get(Calendar.YEAR) && a.get(Calendar.DAY_OF_YEAR) == b.get(Calendar.DAY_OF_YEAR)
+        val time = SimpleDateFormat("h:mm a", Locale.getDefault()).format(target.time)
+        return when {
+            sameDay(target, today) -> "today at $time"
+            sameDay(target, tomorrow) -> "tomorrow at $time"
+            else -> SimpleDateFormat("EEE d MMM", Locale.getDefault()).format(target.time) + " at $time"
         }
     }
 
@@ -242,6 +333,24 @@ class ChatActivity : AppCompatActivity() {
         messageList.add(ChatMessage(message, isUser))
         adapter.notifyItemInserted(messageList.size - 1)
         recyclerView.scrollToPosition(messageList.size - 1)
+        ChatHistory.save(this, messageList)
+    }
+
+    /** Swaps the "Thinking..." bubble for the real reply. */
+    private fun replaceLastMessage(text: String) {
+        val lastIndex = messageList.size - 1
+        if (lastIndex < 0) return
+        messageList[lastIndex] = ChatMessage(text, false)
+        adapter.notifyItemChanged(lastIndex)
+        recyclerView.scrollToPosition(lastIndex)
+        ChatHistory.save(this, messageList)
+    }
+
+    private fun clearConversation() {
+        ChatHistory.clear(this)
+        val size = messageList.size
+        messageList.clear()
+        adapter.notifyItemRangeRemoved(0, size)
     }
 
     private fun isValidEmail(email: String): Boolean {
