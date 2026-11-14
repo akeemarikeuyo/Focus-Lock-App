@@ -16,7 +16,7 @@ android {
         applicationId = "com.focuslockapp.myapplication"
         minSdk = 24
         targetSdk = 36
-        versionCode = 20
+        versionCode = 21
         versionName = "1.6.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
