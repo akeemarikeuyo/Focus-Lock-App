@@ -356,7 +356,7 @@ class MainActivity : AppCompatActivity() {
         checkRepeat.setOnClickListener {
             // Changing the schedule mid-session would be a free way out of the lock.
             if (blockIfLocked()) {
-                checkRepeat.isChecked = FocusState.prefs(this).getBoolean(FocusState.KEY_REPEAT_DAILY, true)
+                checkRepeat.isChecked = FocusState.prefs(this).getBoolean(FocusState.KEY_REPEAT_DAILY, false)
             } else {
                 FocusState.prefs(this).edit().putBoolean(FocusState.KEY_REPEAT_DAILY, checkRepeat.isChecked).apply()
             }
@@ -440,7 +440,7 @@ class MainActivity : AppCompatActivity() {
         startMin = prefs.getInt("START_MIN", 0)
         endHour = prefs.getInt("END_HOUR", 17)
         endMin = prefs.getInt("END_MIN", 0)
-        checkRepeat.isChecked = prefs.getBoolean("REPEAT_DAILY", true)
+        checkRepeat.isChecked = prefs.getBoolean("REPEAT_DAILY", false)
         updateTimeButton(btnStartTime, startHour, startMin, true)
         updateTimeButton(btnEndTime, endHour, endMin, false)
     }

@@ -103,7 +103,7 @@ class BlockerService : Service() {
         startMin = prefs.getInt("START_MIN", 0)
         endHour = prefs.getInt("END_HOUR", FocusState.DEFAULT_END_HOUR)
         endMin = prefs.getInt("END_MIN", 0)
-        repeatDaily = prefs.getBoolean("REPEAT_DAILY", true)
+        repeatDaily = prefs.getBoolean("REPEAT_DAILY", false)
         manualBlockActivationDate = prefs.getString("MANUAL_BLOCK_ACTIVATION_DATE", null)
     }
 

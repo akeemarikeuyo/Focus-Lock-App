@@ -159,7 +159,7 @@ object FocusState {
      * next morning for an overnight window that crosses midnight).
      */
     fun isWithinRepeatWindow(p: SharedPreferences, overnight: Boolean): Boolean {
-        if (p.getBoolean(KEY_REPEAT_DAILY, true)) return true
+        if (p.getBoolean(KEY_REPEAT_DAILY, false)) return true
         val activationDate = p.getString(KEY_ACTIVATION_DATE, null) ?: return false
         if (activationDate == dayString(0)) return true
         return overnight && activationDate == dayString(-1)
@@ -200,7 +200,7 @@ object FocusState {
             context, apps,
             p.getInt(KEY_START_HOUR, DEFAULT_START_HOUR), p.getInt(KEY_START_MIN, 0),
             p.getInt(KEY_END_HOUR, DEFAULT_END_HOUR), p.getInt(KEY_END_MIN, 0),
-            p.getBoolean(KEY_REPEAT_DAILY, true),
+            p.getBoolean(KEY_REPEAT_DAILY, false),
         )
         return true
     }
@@ -280,7 +280,7 @@ object FocusState {
         if (p.getBoolean(KEY_AI_LOCKED, false) && now >= p.getLong(KEY_AI_END, 0)) {
             p.edit().putBoolean(KEY_AI_LOCKED, false).apply()
         }
-        if (isManualActive(context) && !p.getBoolean(KEY_REPEAT_DAILY, true) && !isManualBlockingNow(context)) {
+        if (isManualActive(context) && !p.getBoolean(KEY_REPEAT_DAILY, false) && !isManualBlockingNow(context)) {
             val start = p.getInt(KEY_START_HOUR, DEFAULT_START_HOUR) * 60 + p.getInt(KEY_START_MIN, 0)
             val end = p.getInt(KEY_END_HOUR, DEFAULT_END_HOUR) * 60 + p.getInt(KEY_END_MIN, 0)
             val nextStartDay = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(nextManualStartMillis(context)))
@@ -361,7 +361,7 @@ object FocusState {
      */
     fun updateAutoStop(context: Context) {
         val p = prefs(context)
-        if (!isManualActive(context) || p.getBoolean(KEY_REPEAT_DAILY, true)) {
+        if (!isManualActive(context) || p.getBoolean(KEY_REPEAT_DAILY, false)) {
             cancelAutoStop(context)
             return
         }
